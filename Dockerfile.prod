@@ -1,0 +1,59 @@
+# Production Dockerfile with multi-stage build
+# Optimized for security and size
+
+# ============================================
+# Stage 1: Builder
+# ============================================
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Copy package files first for better layer caching
+COPY package*.json ./
+
+# Install all dependencies (including dev for build)
+RUN npm ci --only=production
+COPY . .
+RUN npm run build
+
+# ============================================
+# Stage 2: Production Runtime
+# ============================================
+FROM node:20-alpine
+
+# Install curl for healthcheck
+RUN apk add --no-cache curl
+
+WORKDIR /app
+
+# Copy build artifacts from builder
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/package*.json ./
+
+# Copy templates if exists (mkdir -p ensures no error if missing)
+RUN mkdir -p /app/templates
+COPY --from=builder /app/template[s] ./templates/
+
+# Install production dependencies only
+RUN npm ci --only=production && npm cache clean --force
+
+# Create non-root user for security
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nodeuser -u 1001
+
+# Create logs directory with proper permissions
+RUN mkdir -p /app/logs && chown -R nodeuser:nodejs /app/logs
+
+# Switch to non-root user
+USER nodeuser
+
+# Expose port
+EXPOSE 3000
+
+# Health check using curl (more reliable than node)
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:3000/health || exit 1
+
+# Default command
+CMD ["node", "dist/server.js"]
+

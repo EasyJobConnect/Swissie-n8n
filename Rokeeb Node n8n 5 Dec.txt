@@ -1,0 +1,41 @@
+Rokeeb n8n Node 5 Dec 
+
+| 1 | P0       | `Dockerfile.prod`                             | Create final production Dockerfile (multi-stage, Alpine, non-root user `node`, copy `/templates`, HEALTHCHECK every 30s) – use template below | `docker build -f Dockerfile.prod .` → succeeds<br>`docker run` → `whoami` = node<br>`curl localhost:3000/health` → 200             
+| 2 | P0       | `pm2.config.js` + `src/server.ts`             | Add `wait_ready: true` + `kill_timeout: 10000` in pm2 config<br>Call `process.send('ready')` right after `app.listen()`                     | `pm2 start pm2.config.js --env production` → all apps show ✓ ready in `pm2 list`  
+| 3 | P0       | `src/config/env.ts` + `src/server.ts`         | If `CORS_ALLOWED_ORIGINS` empty → default to `https://app.yourdomain.com` (never `*` or `true`)                                           | Start app without CORS env → header = `https://app.yourdomain.com`   
+| 4 | P0       | `/migrations/` + `package.json`               | Create `/migrations/20251205-final-indexes.js` with **all** missing indexes (see exact script below                                         | `npm run migrate:up` → status applied<br>Mongo shell → every index exists (internal_event_id unique, etc.)  
+| 5 | P0       | `src/queue/worker.ts`                         | On `worker.on('failed')` → if attempts ≥ max → push job to `${queue.name}_dlq`                                                                 | Force job to fail 5 times → appears in `flow_dlq`, `refund_dlq`, etc.         
+| 6 | P0       | `src/config/env.ts`                           | Add secret length validation: HMAC_SECRET, JWT_SECRET, N8N_TOKEN ≥ 32 chars → throw clear error on startup                                 | Start with short secret → app exits with “secret too short” error     
+| 7 | P1       | `src/workers/flowExecutor.ts`                 | Add jitter 50–150 ms to every retry/backoff inside flowExecutor (same as messagingRetry)                                                      | Simulate 3 failures → logs show different delays (1050ms, 2180ms, 4120ms)    
+| 8 | P1       | `src/middleware/idempotency.ts`               | On replay, add `"_idempotent": true` **inside JSON body** (not only header)                                                                    | Send same request twice → 2nd response JSON contains `" _idempotent": true`      
+| 9 | P1       | `src/lib/hmac.ts`                             | Wrap canonicalStringify in try/catch → return `"[CIRCULAR]"` on error                                                                         | POST circular payload → no crash, signature computed     
+|10| P1       | `src/controllers/healthController.ts`         | In deep mode add Redis persistence: `aof_current_rewrite_time_sec` + `rdb_last_save_time`                                                      | `curl "/health?deep=true"` → JSON contains both fields       
+|11| P1       | `src/lib/logger.ts` + audit insertions       | Add PII masking (email → u***@e***.com, phone → +1***456, token → tok_***) before every log & audit write                                   | Request with real email/phone → logs & audit collection show masked values          
+|12| P1       | Repo-wide                                     | Final snake_case sweep: `grep -r "startedAt\|completedAt\|failedAt\|updatedAt" src/` → replace all remaining camelCase timestamps          | After PR → grep returns zero matches                                        
+|13| P1       | `src/db/indexes.ts` or migration              | Ensure `idempotency_keys` is capped collection (2 GB) in migration                                                                            | After migrate:up → `db.idempotency_keys.isCapped()` → true                                               
+|14| P1       | `src/queue/worker.ts` + `src/config/env.ts`   | Validate `QUEUE_CONCURRENCY` → clamp 1–50, log effective value                                                                                | Set env=999 → logs “Effective concurrency: 50”                                                                     
+|15| P1       | Tests folder                                  | Add missing edge tests for:<br>• Idempotency >16KB → `_truncated: true`<br>• DLQ routing<br>• Circular payload<br>• Signature replay             | `npm test` → 100% pass, coverage ≥ 90% on middleware & workers                                                           
+
+### Dockerfile.prod
+
+```dockerfile
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --only=production
+COPY . .
+RUN npm run build
+
+FROM node:20-alpine
+RUN apk add --no-cache curl
+WORKDIR /app
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/templates ./templates
+COPY --from=builder /app/package*.json ./
+RUN npm ci --only=production && npm cache clean --force
+RUN addgroup -g 1001 -S nodejs && adduser -S nodeuser -u 1001
+USER nodeuser
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:3000/health || exit 1
+CMD ["node", "dist/server.js"]

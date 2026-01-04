@@ -1,0 +1,1241 @@
+{
+  "name": "Complete n8n Workflows Export",
+  "createdAt": "2024-11-17T23:45:00.000Z",
+  "updatedAt": "2024-11-17T23:45:00.000Z",
+  "workflows": [
+    {
+      "id": "1",
+      "name": "Workflow A: Ingest & Validate",
+      "active": false,
+      "nodes": [
+        {
+          "parameters": {
+            "httpMethod": "POST",
+            "path": "ingest",
+            "responseMode": "responseNode",
+            "options": {}
+          },
+          "id": "webhook-trigger",
+          "name": "Webhook Entry Point",
+          "type": "n8n-nodes-base.webhook",
+          "typeVersion": 1.1,
+          "position": [240, 300],
+          "webhookId": "ingest-webhook"
+        },
+        {
+          "parameters": {
+            "conditions": {
+              "options": {
+                "caseSensitive": true,
+                "leftValue": "",
+                "typeValidation": "strict"
+              },
+              "conditions": [
+                {
+                  "leftValue": "={{ $json.body.internal_event_id }}",
+                  "rightValue": "",
+                  "operator": {
+                    "type": "string",
+                    "operation": "notEmpty"
+                  }
+                },
+                {
+                  "leftValue": "={{ $json.body.source }}",
+                  "rightValue": "",
+                  "operator": {
+                    "type": "string",
+                    "operation": "notEmpty"
+                  }
+                },
+                {
+                  "leftValue": "={{ $json.body.user_id }}",
+                  "rightValue": "",
+                  "operator": {
+                    "type": "string",
+                    "operation": "notEmpty"
+                  }
+                }
+              ],
+              "combinator": "and"
+            }
+          },
+          "id": "validate-fields",
+          "name": "Validate Required",
+          "type": "n8n-nodes-base.if",
+          "typeVersion": 2,
+          "position": [460, 300]
+        },
+        {
+          "parameters": {
+            "jsCode": "const payload = $input.first().json.body;\n\nconst enriched = {\n  ...payload,\n  processed_at: new Date().toISOString(),\n  workflow: 'A'\n};\n\nif (payload.action === 'subscription_created' && payload.amount > 0) {\n  enriched.requires_credit_grant = true;\n  enriched.requires_notification = true;\n}\n\nif (payload.amount && payload.amount >= 1000) {\n  enriched.high_value = true;\n  enriched.requires_verification = true;\n}\n\nreturn { json: enriched };"
+          },
+          "id": "apply-rules",
+          "name": "Business Rules",
+          "type": "n8n-nodes-base.code",
+          "typeVersion": 2,
+          "position": [680, 240]
+        },
+        {
+          "parameters": {
+            "method": "POST",
+            "url": "={{ $env.BACKEND_URL }}/services/storage/upsert",
+            "authentication": "predefinedCredentialType",
+            "nodeCredentialType": "httpHeaderAuth",
+            "sendBody": true,
+            "specifyBody": "json",
+            "jsonBody": "={\n  \"collection\": \"events\",\n  \"match\": { \"internal_event_id\": \"{{ $json.internal_event_id }}\" },\n  \"update\": {\n    \"$set\": {\n      \"source\": \"{{ $json.source }}\",\n      \"user_id\": \"{{ $json.user_id }}\",\n      \"action\": \"{{ $json.action }}\",\n      \"amount\": {{ $json.amount || 0 }},\n      \"workflow_a_at\": \"{{ $json.processed_at }}\"\n    }\n  },\n  \"options\": { \"upsert\": true }\n}",
+            "options": {}
+          },
+          "id": "store-event",
+          "name": "Store Event",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.2,
+          "position": [900, 240],
+          "credentials": {
+            "httpHeaderAuth": {
+              "id": "1",
+              "name": "Backend JWT Auth"
+            }
+          }
+        },
+        {
+          "parameters": {
+            "method": "POST",
+            "url": "={{ $env.N8N_WEBHOOK_BASE }}/workflow-b",
+            "sendBody": true,
+            "specifyBody": "json",
+            "jsonBody": "={{ JSON.stringify($json) }}",
+            "options": {}
+          },
+          "id": "trigger-b",
+          "name": "→ Workflow B",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.2,
+          "position": [1120, 240]
+        },
+        {
+          "parameters": {
+            "respondWith": "json",
+            "responseBody": "={\n  \"status\": \"processing\",\n  \"internal_event_id\": \"{{ $json.internal_event_id }}\"\n}",
+            "options": {}
+          },
+          "id": "success-response",
+          "name": "Success Response",
+          "type": "n8n-nodes-base.respondToWebhook",
+          "typeVersion": 1,
+          "position": [1340, 240]
+        },
+        {
+          "parameters": {
+            "method": "POST",
+            "url": "={{ $env.BACKEND_URL }}/alert/admin",
+            "authentication": "predefinedCredentialType",
+            "nodeCredentialType": "httpHeaderAuth",
+            "sendBody": true,
+            "specifyBody": "json",
+            "jsonBody": "={\n  \"severity\": \"error\",\n  \"message\": \"Workflow A: Validation Failed\",\n  \"context\": { \"payload\": {{ JSON.stringify($json.body) }} }\n}",
+            "options": {}
+          },
+          "id": "alert-fail",
+          "name": "Alert Admin",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.2,
+          "position": [680, 400],
+          "credentials": {
+            "httpHeaderAuth": {
+              "id": "1",
+              "name": "Backend JWT Auth"
+            }
+          }
+        },
+        {
+          "parameters": {
+            "respondWith": "json",
+            "responseBody": "={ \"status\": \"error\", \"message\": \"Validation failed\" }",
+            "options": {
+              "responseCode": 400
+            }
+          },
+          "id": "error-response",
+          "name": "Error Response",
+          "type": "n8n-nodes-base.respondToWebhook",
+          "typeVersion": 1,
+          "position": [900, 400]
+        }
+      ],
+      "connections": {
+        "Webhook Entry Point": {
+          "main": [[{ "node": "Validate Required", "type": "main", "index": 0 }]]
+        },
+        "Validate Required": {
+          "main": [
+            [{ "node": "Business Rules", "type": "main", "index": 0 }],
+            [{ "node": "Alert Admin", "type": "main", "index": 0 }]
+          ]
+        },
+        "Business Rules": {
+          "main": [[{ "node": "Store Event", "type": "main", "index": 0 }]]
+        },
+        "Store Event": {
+          "main": [[{ "node": "→ Workflow B", "type": "main", "index": 0 }]]
+        },
+        "→ Workflow B": {
+          "main": [[{ "node": "Success Response", "type": "main", "index": 0 }]]
+        },
+        "Alert Admin": {
+          "main": [[{ "node": "Error Response", "type": "main", "index": 0 }]]
+        }
+      },
+      "settings": {
+        "executionOrder": "v1"
+      },
+      "staticData": null,
+      "tags": [],
+      "triggerCount": 1,
+      "versionId": "1"
+    },
+    {
+      "id": "2",
+      "name": "Workflow B: User Lifecycle",
+      "active": false,
+      "nodes": [
+        {
+          "parameters": {
+            "httpMethod": "POST",
+            "path": "workflow-b",
+            "responseMode": "responseNode",
+            "options": {}
+          },
+          "id": "webhook-b",
+          "name": "From Workflow A",
+          "type": "n8n-nodes-base.webhook",
+          "typeVersion": 1.1,
+          "position": [240, 300]
+        },
+        {
+          "parameters": {
+            "method": "POST",
+            "url": "={{ $env.BACKEND_URL }}/services/storage/upsert",
+            "authentication": "predefinedCredentialType",
+            "nodeCredentialType": "httpHeaderAuth",
+            "sendBody": true,
+            "specifyBody": "json",
+            "jsonBody": "={\n  \"collection\": \"users\",\n  \"match\": { \"user_id\": \"{{ $json.user_id }}\" },\n  \"update\": {\n    \"$set\": {\n      \"email\": \"{{ $json.email }}\",\n      \"last_action\": \"{{ $json.action }}\",\n      \"updated_at\": \"{{ new Date().toISOString() }}\"\n    },\n    \"$setOnInsert\": {\n      \"created_at\": \"{{ new Date().toISOString() }}\"\n    }\n  },\n  \"options\": { \"upsert\": true }\n}",
+            "options": {}
+          },
+          "id": "upsert-user",
+          "name": "Upsert User",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.2,
+          "position": [460, 300],
+          "credentials": {
+            "httpHeaderAuth": {
+              "id": "1",
+              "name": "Backend JWT Auth"
+            }
+          }
+        },
+        {
+          "parameters": {
+            "conditions": {
+              "options": {
+                "caseSensitive": true,
+                "leftValue": "",
+                "typeValidation": "strict"
+              },
+              "conditions": [
+                {
+                  "leftValue": "={{ $json.requires_verification }}",
+                  "rightValue": true,
+                  "operator": {
+                    "type": "boolean",
+                    "operation": "true"
+                  }
+                }
+              ],
+              "combinator": "and"
+            }
+          },
+          "id": "check-verify",
+          "name": "High-Risk?",
+          "type": "n8n-nodes-base.if",
+          "typeVersion": 2,
+          "position": [680, 300]
+        },
+        {
+          "parameters": {
+            "method": "POST",
+            "url": "={{ $env.BACKEND_URL }}/verify/entitlement",
+            "authentication": "predefinedCredentialType",
+            "nodeCredentialType": "httpHeaderAuth",
+            "sendBody": true,
+            "specifyBody": "json",
+            "jsonBody": "={\n  \"internal_event_id\": \"{{ $json.internal_event_id }}\",\n  \"user_id\": \"{{ $json.user_id }}\",\n  \"action\": \"{{ $json.action }}\",\n  \"amount\": {{ $json.amount || 0 }}\n}",
+            "options": {}
+          },
+          "id": "verify",
+          "name": "Verify Gate",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.2,
+          "position": [900, 200],
+          "credentials": {
+            "httpHeaderAuth": {
+              "id": "1",
+              "name": "Backend JWT Auth"
+            }
+          }
+        },
+        {
+          "parameters": {
+            "conditions": {
+              "options": {
+                "caseSensitive": true,
+                "leftValue": "",
+                "typeValidation": "strict"
+              },
+              "conditions": [
+                {
+                  "leftValue": "={{ $json.allowed }}",
+                  "rightValue": true,
+                  "operator": {
+                    "type": "boolean",
+                    "operation": "true"
+                  }
+                }
+              ],
+              "combinator": "and"
+            }
+          },
+          "id": "check-allowed",
+          "name": "Allowed?",
+          "type": "n8n-nodes-base.if",
+          "typeVersion": 2,
+          "position": [1120, 200]
+        },
+        {
+          "parameters": {
+            "jsCode": "const original = $input.all()[0].json;\nconst verification = $input.item.json;\n\nreturn {\n  json: {\n    ...original,\n    verification_passed: verification.allowed,\n    audit_id: verification.audit_id\n  }\n};"
+          },
+          "id": "merge-verify",
+          "name": "Merge Result",
+          "type": "n8n-nodes-base.code",
+          "typeVersion": 2,
+          "position": [1340, 140]
+        },
+        {
+          "parameters": {
+            "conditions": {
+              "options": {
+                "caseSensitive": true,
+                "leftValue": "",
+                "typeValidation": "strict"
+              },
+              "conditions": [
+                {
+                  "leftValue": "={{ $json.requires_credit_grant }}",
+                  "rightValue": true,
+                  "operator": {
+                    "type": "boolean",
+                    "operation": "true"
+                  }
+                }
+              ],
+              "combinator": "and"
+            }
+          },
+          "id": "check-credit",
+          "name": "Grant Credit?",
+          "type": "n8n-nodes-base.if",
+          "typeVersion": 2,
+          "position": [1120, 400]
+        },
+        {
+          "parameters": {
+            "method": "POST",
+            "url": "={{ $env.BACKEND_URL }}/services/storage/upsert",
+            "authentication": "predefinedCredentialType",
+            "nodeCredentialType": "httpHeaderAuth",
+            "sendBody": true,
+            "specifyBody": "json",
+            "jsonBody": "={\n  \"collection\": \"user_credits\",\n  \"match\": { \"user_id\": \"{{ $json.user_id }}\" },\n  \"update\": {\n    \"$inc\": { \"balance\": {{ $json.amount || 0 }} },\n    \"$push\": {\n      \"transactions\": {\n        \"event_id\": \"{{ $json.internal_event_id }}\",\n        \"amount\": {{ $json.amount || 0 }},\n        \"at\": \"{{ new Date().toISOString() }}\"\n      }\n    }\n  },\n  \"options\": { \"upsert\": true }\n}",
+            "options": {}
+          },
+          "id": "grant-credit",
+          "name": "Grant Credits",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.2,
+          "position": [1340, 360],
+          "credentials": {
+            "httpHeaderAuth": {
+              "id": "1",
+              "name": "Backend JWT Auth"
+            }
+          }
+        },
+        {
+          "parameters": {
+            "jsCode": "return { json: { ...$input.first().json, workflow_b_done: true } };"
+          },
+          "id": "merge-all",
+          "name": "Merge Paths",
+          "type": "n8n-nodes-base.code",
+          "typeVersion": 2,
+          "position": [1560, 300]
+        },
+        {
+          "parameters": {
+            "conditions": {
+              "options": {
+                "caseSensitive": true,
+                "leftValue": "",
+                "typeValidation": "strict"
+              },
+              "conditions": [
+                {
+                  "leftValue": "={{ $json.requires_notification }}",
+                  "rightValue": true,
+                  "operator": {
+                    "type": "boolean",
+                    "operation": "true"
+                  }
+                }
+              ],
+              "combinator": "and"
+            }
+          },
+          "id": "check-notify",
+          "name": "Notify?",
+          "type": "n8n-nodes-base.if",
+          "typeVersion": 2,
+          "position": [1780, 300]
+        },
+        {
+          "parameters": {
+            "method": "POST",
+            "url": "={{ $env.N8N_WEBHOOK_BASE }}/workflow-c",
+            "sendBody": true,
+            "specifyBody": "json",
+            "jsonBody": "={{ JSON.stringify($json) }}",
+            "options": {}
+          },
+          "id": "trigger-c",
+          "name": "→ Workflow C",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.2,
+          "position": [2000, 240]
+        },
+        {
+          "parameters": {
+            "respondWith": "json",
+            "responseBody": "={ \"status\": \"completed\", \"workflow\": \"B\" }",
+            "options": {}
+          },
+          "id": "respond-b",
+          "name": "Response",
+          "type": "n8n-nodes-base.respondToWebhook",
+          "typeVersion": 1,
+          "position": [2220, 300]
+        },
+        {
+          "parameters": {
+            "method": "POST",
+            "url": "={{ $env.BACKEND_URL }}/alert/admin",
+            "authentication": "predefinedCredentialType",
+            "nodeCredentialType": "httpHeaderAuth",
+            "sendBody": true,
+            "specifyBody": "json",
+            "jsonBody": "={\n  \"severity\": \"critical\",\n  \"message\": \"High-Risk Action BLOCKED\",\n  \"context\": { \"event_id\": \"{{ $json.internal_event_id }}\" }\n}",
+            "options": {}
+          },
+          "id": "alert-blocked",
+          "name": "Alert Blocked",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.2,
+          "position": [1340, 260],
+          "credentials": {
+            "httpHeaderAuth": {
+              "id": "1",
+              "name": "Backend JWT Auth"
+            }
+          }
+        }
+      ],
+      "connections": {
+        "From Workflow A": {
+          "main": [[{ "node": "Upsert User", "type": "main", "index": 0 }]]
+        },
+        "Upsert User": {
+          "main": [[{ "node": "High-Risk?", "type": "main", "index": 0 }]]
+        },
+        "High-Risk?": {
+          "main": [
+            [{ "node": "Verify Gate", "type": "main", "index": 0 }],
+            [{ "node": "Grant Credit?", "type": "main", "index": 0 }]
+          ]
+        },
+        "Verify Gate": {
+          "main": [[{ "node": "Allowed?", "type": "main", "index": 0 }]]
+        },
+        "Allowed?": {
+          "main": [
+            [{ "node": "Merge Result", "type": "main", "index": 0 }],
+            [{ "node": "Alert Blocked", "type": "main", "index": 0 }]
+          ]
+        },
+        "Merge Result": {
+          "main": [[{ "node": "Grant Credit?", "type": "main", "index": 0 }]]
+        },
+        "Grant Credit?": {
+          "main": [
+            [{ "node": "Grant Credits", "type": "main", "index": 0 }],
+            [{ "node": "Merge Paths", "type": "main", "index": 0 }]
+          ]
+        },
+        "Grant Credits": {
+          "main": [[{ "node": "Merge Paths", "type": "main", "index": 0 }]]
+        },
+        "Merge Paths": {
+          "main": [[{ "node": "Notify?", "type": "main", "index": 0 }]]
+        },
+        "Notify?": {
+          "main": [
+            [{ "node": "→ Workflow C", "type": "main", "index": 0 }],
+            [{ "node": "Response", "type": "main", "index": 0 }]
+          ]
+        },
+        "→ Workflow C": {
+          "main": [[{ "node": "Response", "type": "main", "index": 0 }]]
+        },
+        "Alert Blocked": {
+          "main": [[{ "node": "Response", "type": "main", "index": 0 }]]
+        }
+      },
+      "settings": {
+        "executionOrder": "v1"
+      },
+      "staticData": null,
+      "tags": [],
+      "triggerCount": 1,
+      "versionId": "2"
+    },
+    {
+      "id": "3",
+      "name": "Workflow C: Notifications",
+      "active": false,
+      "nodes": [
+        {
+          "parameters": {
+            "httpMethod": "POST",
+            "path": "workflow-c",
+            "responseMode": "responseNode",
+            "options": {}
+          },
+          "id": "webhook-c",
+          "name": "From Workflow B",
+          "type": "n8n-nodes-base.webhook",
+          "typeVersion": 1.1,
+          "position": [240, 300]
+        },
+        {
+          "parameters": {
+            "jsCode": "const payload = $input.first().json;\n\nconst templates = {\n  'subscription_created': { id: 'welcome', channels: ['email', 'sms'], priority: 'high' },\n  'payment_success': { id: 'payment_confirm', channels: ['email'], priority: 'medium' },\n  'payment_failed': { id: 'payment_failed', channels: ['email', 'sms'], priority: 'high' }\n};\n\nconst config = templates[payload.action] || { id: 'generic', channels: ['email'], priority: 'low' };\n\nreturn { json: { ...payload, template: config } };"
+          },
+          "id": "select-template",
+          "name": "Select Template",
+          "type": "n8n-nodes-base.code",
+          "typeVersion": 2,
+          "position": [460, 300]
+        },
+        {
+          "parameters": {
+            "conditions": {
+              "options": {
+                "caseSensitive": true,
+                "leftValue": "",
+                "typeValidation": "strict"
+              },
+              "conditions": [
+                {
+                  "leftValue": "={{ $json.email }}",
+                  "rightValue": "",
+                  "operator": {
+                    "type": "string",
+                    "operation": "notEmpty"
+                  }
+                }
+              ],
+              "combinator": "and"
+            }
+          },
+          "id": "check-email",
+          "name": "Has Email?",
+          "type": "n8n-nodes-base.if",
+          "typeVersion": 2,
+          "position": [680, 300]
+        },
+        {
+          "parameters": {
+            "method": "POST",
+            "url": "={{ $env.BACKEND_URL }}/services/messaging/send",
+            "authentication": "predefinedCredentialType",
+            "nodeCredentialType": "httpHeaderAuth",
+            "sendBody": true,
+            "specifyBody": "json",
+            "jsonBody": "={\n  \"channel\": \"email\",\n  \"to\": \"{{ $json.email }}\",\n  \"template_id\": \"{{ $json.template.id }}\",\n  \"params\": {\n    \"user_id\": \"{{ $json.user_id }}\",\n    \"action\": \"{{ $json.action }}\",\n    \"amount\": {{ $json.amount || 0 }}\n  },\n  \"fallback\": { \"channel\": \"sms\", \"to\": \"{{ $json.phone }}\" }\n}",
+            "options": {}
+          },
+          "id": "send-email",
+          "name": "Send Email",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.2,
+          "position": [900, 240],
+          "credentials": {
+            "httpHeaderAuth": {
+              "id": "1",
+              "name": "Backend JWT Auth"
+            }
+          }
+        },
+        {
+          "parameters": {
+            "conditions": {
+              "options": {
+                "caseSensitive": true,
+                "leftValue": "",
+                "typeValidation": "strict"
+              },
+              "conditions": [
+                {
+                  "leftValue": "={{ $json.phone }}",
+                  "rightValue": "",
+                  "operator": {
+                    "type": "string",
+                    "operation": "notEmpty"
+                  }
+                },
+                {
+                  "leftValue": "={{ $json.template.channels }}",
+                  "rightValue": "sms",
+                  "operator": {
+                    "type": "string",
+                    "operation": "contains"
+                  }
+                }
+              ],
+              "combinator": "and"
+            }
+          },
+          "id": "check-sms",
+          "name": "SMS Required?",
+          "type": "n8n-nodes-base.if",
+          "typeVersion": 2,
+          "position": [1120, 240]
+        },
+        {
+          "parameters": {
+            "method": "POST",
+            "url": "={{ $env.BACKEND_URL }}/services/messaging/send",
+            "authentication": "predefinedCredentialType",
+            "nodeCredentialType": "httpHeaderAuth",
+            "sendBody": true,
+            "specifyBody": "json",
+            "jsonBody": "={\n  \"channel\": \"sms\",\n  \"to\": \"{{ $json.phone }}\",\n  \"template_id\": \"{{ $json.template.id }}_sms\",\n  \"params\": {\n    \"user_id\": \"{{ $json.user_id }}\",\n    \"amount\": {{ $json.amount || 0 }}\n  }\n}",
+            "options": {}
+          },
+          "id": "send-sms",
+          "name": "Send SMS",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.2,
+          "position": [1340, 180],
+          "credentials": {
+            "httpHeaderAuth": {
+              "id": "1",
+              "name": "Backend JWT Auth"
+            }
+          }
+        },
+        {
+          "parameters": {
+            "conditions": {
+              "options": {
+                "caseSensitive": true,
+                "leftValue": "",
+                "typeValidation": "strict"
+              },
+              "conditions": [
+                {
+                  "leftValue": "={{ $json.template.priority }}",
+                  "rightValue": "high",
+                  "operator": {
+                    "type": "string",
+                    "operation": "equals"
+                  }
+                }
+              ],
+              "combinator": "and"
+            }
+          },
+          "id": "check-priority",
+          "name": "High Priority?",
+          "type": "n8n-nodes-base.if",
+          "typeVersion": 2,
+          "position": [1340, 400]
+        },
+        {
+          "parameters": {
+            "method": "POST",
+            "url": "={{ $env.BACKEND_URL }}/services/messaging/send",
+            "authentication": "predefinedCredentialType",
+            "nodeCredentialType": "httpHeaderAuth",
+            "sendBody": true,
+            "specifyBody": "json",
+            "jsonBody": "={\n  \"channel\": \"slack\",\n  \"to\": \"{{ $env.SLACK_ALERT_CHANNEL || '#notifications' }}\",\n  \"template_id\": \"high_priority\",\n  \"params\": {\n    \"event_id\": \"{{ $json.internal_event_id }}\",\n    \"user_id\": \"{{ $json.user_id }}\",\n    \"action\": \"{{ $json.action }}\",\n    \"amount\": {{ $json.amount || 0 }}\n  }\n}",
+            "options": {}
+          },
+          "id": "send-slack",
+          "name": "Slack Alert",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.2,
+          "position": [1560, 360],
+          "credentials": {
+            "httpHeaderAuth": {
+              "id": "1",
+              "name": "Backend JWT Auth"
+            }
+          }
+        },
+        {
+          "parameters": {
+            "method": "POST",
+            "url": "={{ $env.BACKEND_URL }}/services/storage/upsert",
+            "authentication": "predefinedCredentialType",
+            "nodeCredentialType": "httpHeaderAuth",
+            "sendBody": true,
+            "specifyBody": "json",
+            "jsonBody": "={\n  \"collection\": \"notification_log\",\n  \"match\": { \"internal_event_id\": \"{{ $json.internal_event_id }}\" },\n  \"update\": {\n    \"$set\": {\n      \"sent_at\": \"{{ new Date().toISOString() }}\",\n      \"channels\": {{ JSON.stringify($json.template.channels) }}\n    }\n  },\n  \"options\": { \"upsert\": true }\n}",
+            "options": {}
+          },
+          "id": "log-notification",
+          "name": "Log Sent",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.2,
+          "position": [1780, 300],
+          "credentials": {
+            "httpHeaderAuth": {
+              "id": "1",
+              "name": "Backend JWT Auth"
+            }
+          }
+        },
+        {
+          "parameters": {
+            "respondWith": "json",
+            "responseBody": "={ \"status\": \"completed\", \"workflow\": \"C\" }",
+            "options": {}
+          },
+          "id": "respond-c",
+          "name": "Response",
+          "type": "n8n-nodes-base.respondToWebhook",
+          "typeVersion": 1,
+          "position": [2000, 300]
+        },
+        {
+          "parameters": {
+            "method": "POST",
+            "url": "={{ $env.BACKEND_URL }}/alert/admin",
+            "authentication": "predefinedCredentialType",
+            "nodeCredentialType": "httpHeaderAuth",
+            "sendBody": true,
+            "specifyBody": "json",
+            "jsonBody": "={\n  \"severity\": \"warning\",\n  \"message\": \"No contact info for notification\",\n  \"context\": { \"event_id\": \"{{ $json.internal_event_id }}\" }\n}",
+            "options": {}
+          },
+          "id": "alert-no-contact",
+          "name": "Alert No Contact",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.2,
+          "position": [900, 400],
+          "credentials": {
+            "httpHeaderAuth": {
+              "id": "1",
+              "name": "Backend JWT Auth"
+            }
+          }
+        }
+      ],
+      "connections": {
+        "From Workflow B": {
+          "main": [[{ "node": "Select Template", "type": "main", "index": 0 }]]
+        },
+        "Select Template": {
+          "main": [[{ "node": "Has Email?", "type": "main", "index": 0 }]]
+        },
+        "Has Email?": {
+          "main": [
+            [{ "node": "Send Email", "type": "main", "index": 0 }],
+            [{ "node": "Alert No Contact", "type": "main", "index": 0 }]
+          ]
+        },
+        "Send Email": {
+          "main": [[{ "node": "SMS Required?", "type": "main", "index": 0 }]]
+        },
+        "SMS Required?": {
+          "main": [
+            [{ "node": "Send SMS", "type": "main", "index": 0 }],
+            [{ "node": "High Priority?", "type": "main", "index": 0 }]
+          ]
+        },
+        "Send SMS": {
+          "main": [[{ "node": "High Priority?", "type": "main", "index": 0 }]]
+        },
+        "High Priority?": {
+          "main": [
+            [{ "node": "Slack Alert", "type": "main", "index": 0 }],
+            [{ "node": "Log Sent", "type": "main", "index": 0 }]
+          ]
+        },
+        "Slack Alert": {
+          "main": [[{ "node": "Log Sent", "type": "main", "index": 0 }]]
+        },
+        "Log Sent": {
+          "main": [[{ "node": "Response", "type": "main", "index": 0 }]]
+        },
+        "Alert No Contact": {
+          "main": [[{ "node": "Response", "type": "main", "index": 0 }]]
+        }
+      },
+      "settings": {
+        "executionOrder": "v1"
+      },
+      "staticData": null,
+      "tags": [],
+      "triggerCount": 1,
+      "versionId": "3"
+    },
+    {
+      "id": "4",
+      "name": "Workflow D: Data Sync",
+      "active": false,
+      "nodes": [
+        {
+          "parameters": {
+            "rule": {
+              "interval": [{ "field": "hours", "hoursInterval": 1 }]
+            }
+          },
+          "id": "schedule-hourly",
+          "name": "Every Hour",
+          "type": "n8n-nodes-base.scheduleTrigger",
+          "typeVersion": 1.2,
+          "position": [240, 300]
+        },
+        {
+          "parameters": {
+            "operation": "read",
+            "documentId": {
+              "__rl": true,
+              "value": "={{ $env.GOOGLE_SHEET_ID }}",
+              "mode": "id"
+            },
+            "sheetName": {
+              "__rl": true,
+              "value": "={{ $env.GOOGLE_SHEET_NAME || 'Events' }}",
+              "mode": "name"
+            },
+            "options": {}
+          },
+          "id": "read-sheets",
+          "name": "Read Sheet",
+          "type": "n8n-nodes-base.googleSheets",
+          "typeVersion": 4.4,
+          "position": [460, 300],
+          "credentials": {
+            "googleSheetsOAuth2Api": {
+              "id": "2",
+              "name": "Google Sheets Service Account"
+            }
+          }
+        },
+        {
+          "parameters": {
+            "jsCode": "const items = $input.all();\nconst normalized = [];\n\nfor (const item of items) {\n  const row = item.json;\n  if (!row.user_id || row.user_id === 'user_id') continue;\n  \n  normalized.push({\n    json: {\n      user_id: row.user_id,\n      email: row.email,\n      phone: row.phone,\n      action: row.action || 'sheet_sync',\n      amount: parseFloat(row.amount) || 0,\n      internal_event_id: `sheet_${row.user_id}_${Date.now()}`\n    }\n  });\n}\n\nreturn normalized;"
+          },
+          "id": "normalize",
+          "name": "Normalize Data",
+          "type": "n8n-nodes-base.code",
+          "typeVersion": 2,
+          "position": [680, 300]
+        },
+        {
+          "parameters": {
+            "conditions": {
+              "options": {
+                "caseSensitive": true,
+                "leftValue": "",
+                "typeValidation": "strict"
+              },
+              "conditions": [
+                {
+                  "leftValue": "={{ $json.user_id }}",
+                  "rightValue": "",
+                  "operator": {
+                    "type": "string",
+                    "operation": "notEmpty"
+                  }
+                },
+                {
+                  "leftValue": "={{ $json.email }}",
+                  "rightValue": "",
+                  "operator": {
+                    "type": "string",
+                    "operation": "notEmpty"
+                  }
+                }
+              ],
+              "combinator": "and"
+            }
+          },
+          "id": "validate-row",
+          "name": "Valid Row?",
+          "type": "n8n-nodes-base.if",
+          "typeVersion": 2,
+          "position": [900, 300]
+        },
+        {
+          "parameters": {
+            "batchSize": 10,
+            "options": {}
+          },
+          "id": "split-batch",
+          "name": "Batch (10)",
+          "type": "n8n-nodes-base.splitInBatches",
+          "typeVersion": 3,
+          "position": [1120, 240]
+        },
+        {
+          "parameters": {
+            "method": "POST",
+            "url": "={{ $env.BACKEND_URL }}/services/storage/upsert",
+            "authentication": "predefinedCredentialType",
+            "nodeCredentialType": "httpHeaderAuth",
+            "sendBody": true,
+            "specifyBody": "json",
+            "jsonBody": "={\n  \"collection\": \"users\",\n  \"match\": { \"user_id\": \"{{ $json.user_id }}\" },\n  \"update\": {\n    \"$set\": {\n      \"email\": \"{{ $json.email }}\",\n      \"phone\": \"{{ $json.phone }}\",\n      \"synced_at\": \"{{ new Date().toISOString() }}\"\n    },\n    \"$setOnInsert\": { \"source\": \"sheets\" }\n  },\n  \"options\": { \"upsert\": true }\n}",
+            "options": {}
+          },
+          "id": "upsert-batch",
+          "name": "Upsert Users",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.2,
+          "position": [1340, 240],
+          "credentials": {
+            "httpHeaderAuth": {
+              "id": "1",
+              "name": "Backend JWT Auth"
+            }
+          }
+        },
+        {
+          "parameters": {
+            "jsCode": "const all = $input.all();\nconst success = all.filter(i => i.json.matched_count >= 0 || i.json.upserted_id).length;\n\nreturn {\n  json: {\n    total: all.length,\n    successful: success,\n    failed: all.length - success,\n    synced_at: new Date().toISOString()\n  }\n};"
+          },
+          "id": "aggregate",
+          "name": "Aggregate Results",
+          "type": "n8n-nodes-base.code",
+          "typeVersion": 2,
+          "position": [1560, 240]
+        },
+        {
+          "parameters": {
+            "method": "POST",
+            "url": "={{ $env.BACKEND_URL }}/services/storage/upsert",
+            "authentication": "predefinedCredentialType",
+            "nodeCredentialType": "httpHeaderAuth",
+            "sendBody": true,
+            "specifyBody": "json",
+            "jsonBody": "={\n  \"collection\": \"sync_log\",\n  \"match\": { \"sync_date\": \"{{ new Date().toISOString().split('T')[0] }}\" },\n  \"update\": { \"$set\": {{ JSON.stringify($json) }} },\n  \"options\": { \"upsert\": true }\n}",
+            "options": {}
+          },
+          "id": "log-sync",
+          "name": "Log Sync",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.2,
+          "position": [1780, 240],
+          "credentials": {
+            "httpHeaderAuth": {
+              "id": "1",
+              "name": "Backend JWT Auth"
+            }
+          }
+        },
+        {
+          "parameters": {
+            "conditions": {
+              "options": {
+                "caseSensitive": true,
+                "leftValue": "",
+                "typeValidation": "strict"
+              },
+              "conditions": [
+                {
+                  "leftValue": "={{ $json.failed }}",
+                  "rightValue": "0",
+                  "operator": {
+                    "type": "number",
+                    "operation": "gt"
+                  }
+                }
+              ],
+              "combinator": "and"
+            }
+          },
+          "id": "check-failures",
+          "name": "Any Failures?",
+          "type": "n8n-nodes-base.if",
+          "typeVersion": 2,
+          "position": [2000, 240]
+        },
+        {
+          "parameters": {
+            "method": "POST",
+            "url": "={{ $env.BACKEND_URL }}/alert/admin",
+            "authentication": "predefinedCredentialType",
+            "nodeCredentialType": "httpHeaderAuth",
+            "sendBody": true,
+            "specifyBody": "json",
+            "jsonBody": "={\n  \"severity\": \"warning\",\n  \"message\": \"Sheet Sync Had Failures\",\n  \"context\": {{ JSON.stringify($json) }}\n}",
+            "options": {}
+          },
+          "id": "alert-failures",
+          "name": "Alert Failures",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.2,
+          "position": [2220, 180],
+          "credentials": {
+            "httpHeaderAuth": {
+              "id": "1",
+              "name": "Backend JWT Auth"
+            }
+          }
+        }
+      ],
+      "connections": {
+        "Every Hour": {
+          "main": [[{ "node": "Read Sheet", "type": "main", "index": 0 }]]
+        },
+        "Read Sheet": {
+          "main": [[{ "node": "Normalize Data", "type": "main", "index": 0 }]]
+        },
+        "Normalize Data": {
+          "main": [[{ "node": "Valid Row?", "type": "main", "index": 0 }]]
+        },
+        "Valid Row?": {
+          "main": [[{ "node": "Batch (10)", "type": "main", "index": 0 }]]
+        },
+        "Batch (10)": {
+          "main": [
+            [{ "node": "Upsert Users", "type": "main", "index": 0 }],
+            [{ "node": "Aggregate Results", "type": "main", "index": 0 }]
+          ]
+        },
+        "Upsert Users": {
+          "main": [[{ "node": "Batch (10)", "type": "main", "index": 0 }]]
+        },
+        "Aggregate Results": {
+          "main": [[{ "node": "Log Sync", "type": "main", "index": 0 }]]
+        },
+        "Log Sync": {
+          "main": [[{ "node": "Any Failures?", "type": "main", "index": 0 }]]
+        },
+        "Any Failures?": {
+          "main": [[{ "node": "Alert Failures", "type": "main", "index": 0 }]]
+        }
+      },
+      "settings": {
+        "executionOrder": "v1"
+      },
+      "staticData": null,
+      "tags": [],
+      "triggerCount": 1,
+      "versionId": "4"
+    },
+    {
+      "id": "5",
+      "name": "Workflow E: Monitoring",
+      "active": false,
+      "nodes": [
+        {
+          "parameters": {
+            "rule": {
+              "interval": [{ "field": "cronExpression", "expression": "0 9 * * *" }]
+            }
+          },
+          "id": "schedule-daily",
+          "name": "Daily 9 AM",
+          "type": "n8n-nodes-base.scheduleTrigger",
+          "typeVersion": 1.2,
+          "position": [240, 300]
+        },
+        {
+          "parameters": {
+            "method": "GET",
+            "url": "={{ $env.BACKEND_URL }}/metrics",
+            "options": {}
+          },
+          "id": "fetch-metrics",
+          "name": "Get Metrics",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.2,
+          "position": [460, 300]
+        },
+        {
+          "parameters": {
+            "jsCode": "const text = typeof $input.first().json === 'string' ? $input.first().json : $input.first().json.data || '';\nconst lines = text.split('\\n');\n\nconst metrics = {\n  requests: 0,\n  errors: 0,\n  idempotency_hits: 0,\n  messages_sent: 0,\n  otps_generated: 0\n};\n\nfor (const line of lines) {\n  if (line.startsWith('#') || !line.trim()) continue;\n  \n  if (line.includes('http_requests_total')) {\n    const m = line.match(/(\\d+)$/);\n    if (m) metrics.requests += parseInt(m[1]);\n  }\n  if (line.includes('status=\"5') || line.includes('status=\"4')) {\n    const m = line.match(/(\\d+)$/);\n    if (m) metrics.errors += parseInt(m[1]);\n  }\n  if (line.includes('idempotency_hits')) {\n    const m = line.match(/(\\d+)$/);\n    if (m) metrics.idempotency_hits = parseInt(m[1]);\n  }\n  if (line.includes('messaging_sent')) {\n    const m = line.match(/(\\d+)$/);\n    if (m) metrics.messages_sent += parseInt(m[1]);\n  }\n  if (line.includes('otp_generated')) {\n    const m = line.match(/(\\d+)$/);\n    if (m) metrics.otps_generated = parseInt(m[1]);\n  }\n}\n\nconst errorRate = metrics.requests > 0 ? (metrics.errors / metrics.requests * 100).toFixed(2) : 0;\n\nreturn {\n  json: {\n    ...metrics,\n    error_rate: parseFloat(errorRate),\n    date: new Date().toISOString().split('T')[0]\n  }\n};"
+          },
+          "id": "parse-metrics",
+          "name": "Parse Metrics",
+          "type": "n8n-nodes-base.code",
+          "typeVersion": 2,
+          "position": [680, 300]
+        },
+        {
+          "parameters": {
+            "jsCode": "const m = $input.first().json;\n\nconst summary = `📊 **Daily Report - ${m.date}**\n\n**Health:**\n✅ Total Requests: ${m.requests}\n${m.error_rate > 2 ? '🔴' : '🟢'} Error Rate: ${m.error_rate}%\n🔄 Duplicates Caught: ${m.idempotency_hits}\n\n**Activity:**\n📧 Messages Sent: ${m.messages_sent}\n🔐 OTPs Generated: ${m.otps_generated}\n\n**Status:** ${m.error_rate < 2 ? '✅ Healthy' : '⚠️ Attention Required'}`;\n\nreturn { json: { ...m, summary } };"
+          },
+          "id": "generate-summary",
+          "name": "Generate Summary",
+          "type": "n8n-nodes-base.code",
+          "typeVersion": 2,
+          "position": [900, 300]
+        },
+        {
+          "parameters": {
+            "method": "POST",
+            "url": "={{ $env.BACKEND_URL }}/alert/admin",
+            "authentication": "predefinedCredentialType",
+            "nodeCredentialType": "httpHeaderAuth",
+            "sendBody": true,
+            "specifyBody": "json",
+            "jsonBody": "={\n  \"severity\": \"info\",\n  \"message\": \"Daily System Summary\",\n  \"context\": {\n    \"summary\": \"{{ $json.summary }}\",\n    \"metrics\": {\n      \"requests\": {{ $json.requests }},\n      \"error_rate\": {{ $json.error_rate }}\n    }\n  }\n}",
+            "options": {}
+          },
+          "id": "send-summary",
+          "name": "Send Report",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.2,
+          "position": [1120, 300],
+          "credentials": {
+            "httpHeaderAuth": {
+              "id": "1",
+              "name": "Backend JWT Auth"
+            }
+          }
+        },
+        {
+          "parameters": {
+            "method": "POST",
+            "url": "={{ $env.BACKEND_URL }}/services/storage/upsert",
+            "authentication": "predefinedCredentialType",
+            "nodeCredentialType": "httpHeaderAuth",
+            "sendBody": true,
+            "specifyBody": "json",
+            "jsonBody": "={\n  \"collection\": \"daily_reports\",\n  \"match\": { \"date\": \"{{ $json.date }}\" },\n  \"update\": { \"$set\": {{ JSON.stringify($json) }} },\n  \"options\": { \"upsert\": true }\n}",
+            "options": {}
+          },
+          "id": "store-report",
+          "name": "Store Report",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.2,
+          "position": [1340, 300],
+          "credentials": {
+            "httpHeaderAuth": {
+              "id": "1",
+              "name": "Backend JWT Auth"
+            }
+          }
+        },
+        {
+          "parameters": {
+            "conditions": {
+              "options": {
+                "caseSensitive": true,
+                "leftValue": "",
+                "typeValidation": "strict"
+              },
+              "conditions": [
+                {
+                  "leftValue": "={{ $json.error_rate }}",
+                  "rightValue": "2",
+                  "operator": {
+                    "type": "number",
+                    "operation": "gt"
+                  }
+                }
+              ],
+              "combinator": "and"
+            }
+          },
+          "id": "check-threshold",
+          "name": "Error Rate > 2%?",
+          "type": "n8n-nodes-base.if",
+          "typeVersion": 2,
+          "position": [1560, 300]
+        },
+        {
+          "parameters": {
+            "method": "POST",
+            "url": "={{ $env.BACKEND_URL }}/alert/admin",
+            "authentication": "predefinedCredentialType",
+            "nodeCredentialType": "httpHeaderAuth",
+            "sendBody": true,
+            "specifyBody": "json",
+            "jsonBody": "={\n  \"severity\": \"critical\",\n  \"message\": \"🔴 ERROR RATE THRESHOLD EXCEEDED\",\n  \"context\": {\n    \"error_rate\": {{ $json.error_rate }},\n    \"threshold\": 2,\n    \"total_errors\": {{ $json.errors }}\n  }\n}",
+            "options": {}
+          },
+          "id": "alert-threshold",
+          "name": "Critical Alert",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.2,
+          "position": [1780, 240],
+          "credentials": {
+            "httpHeaderAuth": {
+              "id": "1",
+              "name": "Backend JWT Auth"
+            }
+          }
+        }
+      ],
+      "connections": {
+        "Daily 9 AM": {
+          "main": [[{ "node": "Get Metrics", "type": "main", "index": 0 }]]
+        },
+        "Get Metrics": {
+          "main": [[{ "node": "Parse Metrics", "type": "main", "index": 0 }]]
+        },
+        "Parse Metrics": {
+          "main": [[{ "node": "Generate Summary", "type": "main", "index": 0 }]]
+        },
+        "Generate Summary": {
+          "main": [[{ "node": "Send Report", "type": "main", "index": 0 }]]
+        },
+        "Send Report": {
+          "main": [[{ "node": "Store Report", "type": "main", "index": 0 }]]
+        },
+        "Store Report": {
+          "main": [[{ "node": "Error Rate > 2%?", "type": "main", "index": 0 }]]
+        },
+        "Error Rate > 2%?": {
+          "main": [[{ "node": "Critical Alert", "type": "main", "index": 0 }]]
+        }
+      },
+      "settings": {
+        "executionOrder": "v1"
+      },
+      "staticData": null,
+      "tags": [],
+      "triggerCount": 1,
+      "versionId": "5"
+    }
+  ]
+}
+

@@ -1,0 +1,171 @@
+version: '3.8'
+
+services:
+  # MongoDB Database
+  mongo:
+    image: mongo:7
+    container_name: n8n-backend-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: n8n_backend
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    networks:
+      - backend-network
+
+  # Redis for Queue
+  redis:
+    image: redis:7-alpine
+    container_name: n8n-backend-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - backend-network
+
+  # API Service
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: n8n-backend-api
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      LOG_LEVEL: info
+      
+      # Security
+      HMAC_SECRET: ${HMAC_SECRET}
+      JWT_SECRET: ${JWT_SECRET}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-100}
+      INTERNAL_ALLOWLIST: ${INTERNAL_ALLOWLIST:-127.0.0.1/32}
+      SIGNATURE_TOLERANCE_SEC: ${SIGNATURE_TOLERANCE_SEC:-60}
+      
+      # Database
+      MONGO_URI: mongodb://mongo:27017/n8n_backend
+      
+      # Queue (disabled for API)
+      REDIS_URL: redis://redis:6379
+      ENABLE_WORKERS: "false"
+      QUEUE_CONCURRENCY: ${QUEUE_CONCURRENCY:-4}
+      
+      # n8n
+      N8N_INGEST_URL: ${N8N_INGEST_URL}
+      N8N_TOKEN: ${N8N_TOKEN}
+      
+      # Messaging
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN}
+      TWILIO_MESSAGING_SERVICE_SID: ${TWILIO_MESSAGING_SERVICE_SID}
+      
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY}
+      EMAIL_FROM: ${EMAIL_FROM}
+      ALERT_EMAIL_TO: ${ALERT_EMAIL_TO}
+      
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN}
+      SLACK_ALERT_CHANNEL: ${SLACK_ALERT_CHANNEL}
+      
+      # Features
+      IDEMPOTENCY_TTL_SEC: ${IDEMPOTENCY_TTL_SEC:-3600}
+      ENABLE_IDEMPOTENCY_MW: ${ENABLE_IDEMPOTENCY_MW:-false}
+      ENABLE_REFUNDS: ${ENABLE_REFUNDS:-false}
+      REFUND_LIMIT_CENTS: ${REFUND_LIMIT_CENTS:-5000}
+      OTP_SEND_ON_GENERATE: ${OTP_SEND_ON_GENERATE:-false}
+      TEMPLATE_DIR: templates
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - backend-network
+
+  # Worker Service
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: n8n-backend-worker
+    restart: unless-stopped
+    command: ["node", "dist/workers/index.js"]
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: info
+      
+      # Security
+      HMAC_SECRET: ${HMAC_SECRET}
+      JWT_SECRET: ${JWT_SECRET}
+      
+      # Database
+      MONGO_URI: mongodb://mongo:27017/n8n_backend
+      
+      # Queue (enabled for worker)
+      REDIS_URL: redis://redis:6379
+      ENABLE_WORKERS: "true"
+      QUEUE_CONCURRENCY: ${QUEUE_CONCURRENCY:-4}
+      
+      # n8n
+      N8N_INGEST_URL: ${N8N_INGEST_URL}
+      N8N_TOKEN: ${N8N_TOKEN}
+      
+      # Messaging
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN}
+      TWILIO_MESSAGING_SERVICE_SID: ${TWILIO_MESSAGING_SERVICE_SID}
+      
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY}
+      EMAIL_FROM: ${EMAIL_FROM}
+      ALERT_EMAIL_TO: ${ALERT_EMAIL_TO}
+      
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN}
+      SLACK_ALERT_CHANNEL: ${SLACK_ALERT_CHANNEL}
+      
+      # Features
+      TEMPLATE_DIR: templates
+      ENABLE_REFUNDS: ${ENABLE_REFUNDS:-false}
+      REFUND_LIMIT_CENTS: ${REFUND_LIMIT_CENTS:-5000}
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - backend-network
+
+volumes:
+  mongo_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  backend-network:
+    driver: bridge
+

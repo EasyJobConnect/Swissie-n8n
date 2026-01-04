@@ -1,0 +1,569 @@
+{
+  "info": {
+    "name": "n8n Backend API",
+    "description": "Complete API collection for n8n backend with webhook ingress, OTP, messaging, storage, and more",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "1.0.0"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{JWT_TOKEN}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "BASE_URL",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "HMAC_SECRET",
+      "value": "your_hmac_secret_here",
+      "type": "string"
+    },
+    {
+      "key": "JWT_TOKEN",
+      "value": "your_jwt_token_here",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health & Monitoring",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/health",
+              "host": ["{{BASE_URL}}"],
+              "path": ["health"]
+            }
+          }
+        },
+        {
+          "name": "Metrics (Prometheus)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/metrics",
+              "host": ["{{BASE_URL}}"],
+              "path": ["metrics"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Webhook (Public)",
+      "item": [
+        {
+          "name": "Webhook Entry (Signed)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "const crypto = require('crypto');",
+                  "",
+                  "const body = pm.request.body.raw;",
+                  "const secret = pm.variables.get('HMAC_SECRET');",
+                  "const timestamp = Math.floor(Date.now() / 1000).toString();",
+                  "",
+                  "const signature = crypto.createHmac('sha256', secret).update(body).digest('hex');",
+                  "",
+                  "pm.request.headers.add({",
+                  "  key: 'X-Signature',",
+                  "  value: 'sha256=' + signature",
+                  "});",
+                  "",
+                  "pm.request.headers.add({",
+                  "  key: 'X-Timestamp',",
+                  "  value: timestamp",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"source\": \"stripe\",\n  \"user_id\": \"user_123\",\n  \"action\": \"payment_success\",\n  \"amount\": 5000,\n  \"email\": \"user@example.com\",\n  \"phone\": \"+1234567890\",\n  \"metadata\": {\n    \"order_id\": \"ord_abc123\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/webhook/entry",
+              "host": ["{{BASE_URL}}"],
+              "path": ["webhook", "entry"]
+            }
+          }
+        },
+        {
+          "name": "Webhook Entry (With Idempotency)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "const crypto = require('crypto');",
+                  "const { v4: uuidv4 } = require('uuid');",
+                  "",
+                  "const body = pm.request.body.raw;",
+                  "const secret = pm.variables.get('HMAC_SECRET');",
+                  "const timestamp = Math.floor(Date.now() / 1000).toString();",
+                  "",
+                  "const signature = crypto.createHmac('sha256', secret).update(body).digest('hex');",
+                  "const idempotencyKey = 'idem_' + Date.now();",
+                  "",
+                  "pm.request.headers.add({ key: 'X-Signature', value: 'sha256=' + signature });",
+                  "pm.request.headers.add({ key: 'X-Timestamp', value: timestamp });",
+                  "pm.request.headers.add({ key: 'X-Idempotency-Key', value: idempotencyKey });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"source\": \"test\",\n  \"user_id\": \"user_456\",\n  \"action\": \"test_idempotent\"\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/webhook/entry",
+              "host": ["{{BASE_URL}}"],
+              "path": ["webhook", "entry"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Login",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"your_password\"\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/auth/login",
+              "host": ["{{BASE_URL}}"],
+              "path": ["auth", "login"]
+            }
+          }
+        },
+        {
+          "name": "Get Current User",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/auth/me",
+              "host": ["{{BASE_URL}}"],
+              "path": ["auth", "me"]
+            }
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/auth/logout",
+              "host": ["{{BASE_URL}}"],
+              "path": ["auth", "logout"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "OTP",
+      "item": [
+        {
+          "name": "Generate OTP",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subject_type\": \"phone\",\n  \"subject_id\": \"+1234567890\",\n  \"channel\": \"sms\"\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/otp/generate",
+              "host": ["{{BASE_URL}}"],
+              "path": ["otp", "generate"]
+            }
+          }
+        },
+        {
+          "name": "Verify OTP",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"otp_id\": \"your_otp_id_here\",\n  \"code\": \"123456\"\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/otp/verify",
+              "host": ["{{BASE_URL}}"],
+              "path": ["otp", "verify"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Verification",
+      "item": [
+        {
+          "name": "Verify Entitlement",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"internal_event_id\": \"evt_123abc\",\n  \"user_id\": \"user_123\",\n  \"action\": \"high_risk_action\",\n  \"amount\": 10000,\n  \"context\": {\n    \"ip\": \"192.168.1.1\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/verify/entitlement",
+              "host": ["{{BASE_URL}}"],
+              "path": ["verify", "entitlement"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Messaging",
+      "item": [
+        {
+          "name": "Send SMS",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"channel\": \"sms\",\n  \"to\": \"+1234567890\",\n  \"template_id\": \"otp_verification\",\n  \"params\": {\n    \"code\": \"123456\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/services/messaging/send",
+              "host": ["{{BASE_URL}}"],
+              "path": ["services", "messaging", "send"]
+            }
+          }
+        },
+        {
+          "name": "Send Email",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"channel\": \"email\",\n  \"to\": \"user@example.com\",\n  \"template_id\": \"welcome_email\",\n  \"params\": {\n    \"name\": \"John Doe\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/services/messaging/send",
+              "host": ["{{BASE_URL}}"],
+              "path": ["services", "messaging", "send"]
+            }
+          }
+        },
+        {
+          "name": "Send with Fallback",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"channel\": \"sms\",\n  \"to\": \"+1234567890\",\n  \"template_id\": \"notification\",\n  \"params\": {\n    \"message\": \"Important alert\"\n  },\n  \"fallback\": {\n    \"channel\": \"email\",\n    \"to\": \"user@example.com\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/services/messaging/send",
+              "host": ["{{BASE_URL}}"],
+              "path": ["services", "messaging", "send"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Storage",
+      "item": [
+        {
+          "name": "Upsert Document",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"collection\": \"users\",\n  \"match\": {\n    \"user_id\": \"user_123\"\n  },\n  \"update\": {\n    \"$set\": {\n      \"email\": \"user@example.com\",\n      \"name\": \"John Doe\",\n      \"updated_at\": \"{{$isoTimestamp}}\"\n    }\n  },\n  \"options\": {\n    \"upsert\": true\n  }\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/services/storage/upsert",
+              "host": ["{{BASE_URL}}"],
+              "path": ["services", "storage", "upsert"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "Get User",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/user/:id",
+              "host": ["{{BASE_URL}}"],
+              "path": ["user", ":id"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "user_123"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create User",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"newuser@example.com\",\n  \"phone\": \"+1234567890\",\n  \"name\": \"New User\",\n  \"metadata\": {\n    \"source\": \"api\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/user",
+              "host": ["{{BASE_URL}}"],
+              "path": ["user"]
+            }
+          }
+        },
+        {
+          "name": "Update User",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Updated Name\",\n  \"status\": \"active\"\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/user/:id",
+              "host": ["{{BASE_URL}}"],
+              "path": ["user", ":id"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "user_123"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Flows",
+      "item": [
+        {
+          "name": "Execute Flow",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"flow_name\": \"user_onboarding\",\n  \"steps\": [\n    {\n      \"step_id\": \"step1\",\n      \"name\": \"Create user\",\n      \"type\": \"db\",\n      \"config\": {\n        \"collection\": \"users\",\n        \"operation\": \"insertOne\",\n        \"update\": {\n          \"user_id\": \"{{user_id}}\",\n          \"email\": \"{{email}}\"\n        }\n      }\n    },\n    {\n      \"step_id\": \"step2\",\n      \"name\": \"Send welcome email\",\n      \"type\": \"http\",\n      \"config\": {\n        \"url\": \"http://localhost:3000/services/messaging/send\",\n        \"method\": \"POST\",\n        \"body\": {\n          \"channel\": \"email\",\n          \"to\": \"{{email}}\",\n          \"template_id\": \"welcome\"\n        }\n      }\n    }\n  ],\n  \"context\": {\n    \"user_id\": \"user_new_123\",\n    \"email\": \"newuser@example.com\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/flow/execute",
+              "host": ["{{BASE_URL}}"],
+              "path": ["flow", "execute"]
+            }
+          }
+        },
+        {
+          "name": "Get Flow Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/flow/:id/status",
+              "host": ["{{BASE_URL}}"],
+              "path": ["flow", ":id", "status"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "flow_123"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Refunds",
+      "item": [
+        {
+          "name": "Request Refund",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transaction_id\": \"txn_abc123\",\n  \"amount_cents\": 5000,\n  \"reason\": \"customer_request\",\n  \"metadata\": {\n    \"requested_by\": \"admin\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/refunds",
+              "host": ["{{BASE_URL}}"],
+              "path": ["refunds"]
+            }
+          }
+        },
+        {
+          "name": "Get Refund Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/refunds/:id",
+              "host": ["{{BASE_URL}}"],
+              "path": ["refunds", ":id"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "refund_123"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Alerts",
+      "item": [
+        {
+          "name": "Send Admin Alert",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"severity\": \"high\",\n  \"message\": \"Critical system issue detected\",\n  \"context\": {\n    \"service\": \"payment_processor\",\n    \"error_rate\": \"15%\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/alert/admin",
+              "host": ["{{BASE_URL}}"],
+              "path": ["alert", "admin"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
+

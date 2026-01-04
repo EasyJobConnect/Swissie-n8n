@@ -1,0 +1,182 @@
+openapi: 3.0.3
+info:
+  title: n8n Backend API
+  version: 0.1.0
+paths:
+  /webhook/entry:
+    post:
+      summary: Ingests external events (HMAC signed)
+      security:
+        - webhookHmac: []
+      parameters:
+        - in: header
+          name: X-Idempotency-Key
+          required: false
+          schema:
+            type: string
+          description: Idempotency key to deduplicate requests
+        - in: header
+          name: X-Timestamp
+          required: true
+          schema:
+            type: string
+          description: Epoch seconds for replay protection
+        - in: header
+          name: X-Signature
+          required: true
+          schema:
+            type: string
+          description: HMAC SHA256 of the raw body
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Accepted
+  /auth/login:
+    post:
+      summary: Login
+      responses:
+        '501':
+          description: Not implemented
+  /auth/logout:
+    post:
+      summary: Logout
+      security:
+        - internalAuth: []
+      responses:
+        '501':
+          description: Not implemented
+  /auth/me:
+    get:
+      summary: Current user
+      security:
+        - internalAuth: []
+      responses:
+        '501':
+          description: Not implemented
+  /user/{id}:
+    get:
+      summary: Get user
+      security:
+        - internalAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '501':
+          description: Not implemented
+    patch:
+      summary: Update user
+      security:
+        - internalAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '501':
+          description: Not implemented
+  /user:
+    post:
+      summary: Create user
+      security:
+        - internalAuth: []
+      responses:
+        '501':
+          description: Not implemented
+  /flow/execute:
+    post:
+      summary: Execute a flow
+      security:
+        - internalAuth: []
+      responses:
+        '501':
+          description: Not implemented
+  /flow/{id}/status:
+    get:
+      summary: Flow execution status
+      security:
+        - internalAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '501':
+          description: Not implemented
+  /otp/generate:
+    post:
+      summary: Generate OTP
+      security:
+        - internalAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                subject_type:
+                  type: string
+                subject_id:
+                  type: string
+      responses:
+        '200':
+          description: OTP created
+  /otp/verify:
+    post:
+      summary: Verify OTP
+      security:
+        - internalAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                otp_id:
+                  type: string
+                code:
+                  type: string
+      responses:
+        '200':
+          description: Verification result
+  /services/messaging/send:
+    post:
+      summary: Send a message with optional fallback
+      security:
+        - internalAuth: []
+      responses:
+        '200':
+          description: Send result
+  /refunds/request:
+    post:
+      summary: Request a refund
+      security:
+        - internalAuth: []
+      responses:
+        '200':
+          description: Refund result
+components:
+  securitySchemes:
+    webhookHmac:
+      type: apiKey
+      in: header
+      name: X-Signature
+    internalAuth:
+      type: http
+      scheme: bearer
+
+
