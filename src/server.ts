@@ -6,6 +6,7 @@ import compression from 'compression';
 import { correlationId } from './middleware/correlationId';
 import { errorHandler } from './middleware/errorHandler';
 import { registerWebhookRoutes } from './api/webhook';
+import { registerWebhookInternalRoutes } from './api/webhookInternal';
 import { registerVerifyRoutes } from './api/verify';
 import { registerOtpRoutes } from './api/otp';
 import { registerMessagingRoutes } from './api/messaging';
@@ -20,8 +21,12 @@ import { env } from './config/env';
 import { registerAuthRoutes } from './api/auth';
 import { registerUserRoutes } from './api/user';
 import { registerFlowRoutes } from './api/flow';
+import { validateEnvironmentIsolation } from './lib/environmentValidator';
 
 const app = express();
+
+// Validate environment isolation first (fail fast)
+validateEnvironmentIsolation();
 
 // Trust proxy for proper IP detection behind reverse proxy/load balancer
 app.set('trust proxy', 1);
@@ -87,6 +92,9 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 
 // Register webhook route (uses raw body)
 registerWebhookRoutes(app);
+
+// Register internal webhook routes (replay, event listing)
+registerWebhookInternalRoutes(app);
 
 // JSON parsing for remaining routes
 app.use(express.json({ limit: '2mb' }));

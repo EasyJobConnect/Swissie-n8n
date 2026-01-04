@@ -6,6 +6,10 @@ const schema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
   LOG_LEVEL: z.enum(['error', 'warn', 'info', 'http', 'verbose', 'debug', 'silly']).default('info'),
 
+  // Environment isolation (staging vs production)
+  APP_ENV: z.enum(['staging', 'production']).default('staging'),
+  SERVICE_ROLE: z.enum(['webhook-edge', 'api', 'worker']).default('api'),
+
   // Security: Enforce minimum secret lengths (32 chars minimum)
   HMAC_SECRET: z.string().min(32, 'HMAC_SECRET must be at least 32 characters'),
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters').optional(),
